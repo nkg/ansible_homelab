@@ -1,0 +1,39 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Database backup script
+
+set -euo pipefail
+
+BACKUP_DIR="{{ backups_dir }}/databases"
+CONTAINER="{{ backups_postgres_container }}"
+PG_USER="{{ backups_postgres_user }}"
+RETENTION_DAYS={{ backups_retention_days }}
+DATE=$(date +%Y-%m-%d_%H%M%S)
+
+# All databases to back up
+DATABASES=(
+{% for db in backups_databases %}
+  {{ db }}
+{% endfor %}
+)
+
+echo "=== Database backup started at $(date) ==="
+
+for db in "${DATABASES[@]}"; do
+  echo "Backing up: $db"
+  backup_file="${BACKUP_DIR}/${db}_${DATE}.sql.gz"
+
+  if docker exec "$CONTAINER" pg_dump -U "$PG_USER" "$db" 2>/dev/null | gzip > "$backup_file"; then
+    size=$(stat -c%s "$backup_file" 2>/dev/null || stat -f%z "$backup_file" 2>/dev/null || echo "unknown")
+    echo "  OK: $backup_file ($size bytes)"
+  else
+    echo "  WARNING: Failed to backup $db (database may not exist yet)"
+    rm -f "$backup_file"
+  fi
+done
+
+# Cleanup old backups
+echo "Cleaning up backups older than ${RETENTION_DAYS} days..."
+find "$BACKUP_DIR" -name "*.sql.gz" -mtime +"$RETENTION_DAYS" -delete
+
+echo "=== Database backup completed at $(date) ==="

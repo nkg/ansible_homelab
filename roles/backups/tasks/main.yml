@@ -1,0 +1,40 @@
+---
+- name: Create backup directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0750"
+  loop:
+    - "{{ backups_dir }}"
+    - "{{ backups_dir }}/databases"
+    - "{{ backups_dir }}/files"
+
+- name: Deploy database backup script
+  ansible.builtin.template:
+    src: backup-databases.sh.j2
+    dest: "{{ backups_dir }}/backup-databases.sh"
+    mode: "0750"
+
+- name: Create backup cron job
+  ansible.builtin.cron:
+    name: "Database backups"
+    minute: "{{ backups_schedule.split()[0] }}"
+    hour: "{{ backups_schedule.split()[1] }}"
+    day: "{{ backups_schedule.split()[2] }}"
+    month: "{{ backups_schedule.split()[3] }}"
+    weekday: "{{ backups_schedule.split()[4] }}"
+    job: "{{ backups_dir }}/backup-databases.sh >> /var/log/backup-databases.log 2>&1"
+    user: root
+
+- name: Create backup log rotation
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/backup-databases
+    mode: "0644"
+    content: |
+      /var/log/backup-databases.log {
+        weekly
+        rotate 4
+        compress
+        missingok
+        notifempty
+      }

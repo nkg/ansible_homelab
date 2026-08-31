@@ -1,0 +1,21 @@
+{{ ansible_managed | comment }}
+# Periphery config overrides for the Komodo VM (Core + Periphery
+# co-located). Loaded via a second `--config-path` flag on the Periphery
+# binary (set in the systemd drop-in) so bpbradley.komodo's generated
+# periphery.config.toml can be rewritten freely without losing our
+# hardening / outbound-mode settings.
+#
+# Schema notes (verified against
+# client/core/rs/src/entities/config/periphery.rs in moghtech/komodo):
+#   - core_address(es) and connect_as are ROOT-level fields, NOT inside
+#     an [outbound] table. A [outbound] section silently fails — the
+#     parser ignores the unknown table and leaves core_addresses empty.
+{% if komodo_periphery_core_public_keys | default('') | trim | length > 0 %}
+
+core_public_keys = "{{ komodo_periphery_core_public_keys | trim }}"
+{% endif %}
+{% if komodo_periphery_outbound_mode | bool %}
+
+core_address = "{{ komodo_periphery_core_address }}"
+connect_as = "{{ komodo_periphery_connect_as }}"
+{% endif %}

@@ -1,0 +1,27 @@
+---
+# pbs — install Proxmox Backup Server on a Debian VM and provision a default
+# datastore for receiving backups from Proxmox VE nodes and other hosts.
+#
+# Apt source: Proxmox's no-subscription repo. Production users would use the
+# enterprise repo with a subscription; for our scale, no-subscription is fine.
+
+# Pinned to current PBS major; bump deliberately. Version comes from the
+# package itself once installed — this just controls the apt sources file.
+pbs_release: trixie
+
+# Proxmox apt repo URLs (no-subscription = free; pbs-enterprise needs a
+# subscription token).
+pbs_apt_repo_url: "http://download.proxmox.com/debian/pbs"
+pbs_apt_repo_components: "{{ pbs_release }} pbs-no-subscription"
+pbs_apt_key_url: "https://enterprise.proxmox.com/debian/proxmox-release-{{ pbs_release }}.gpg"
+
+# Default datastore — backed by the VM's primary disk. For multi-disk PBS
+# hosts, override pbs_datastore_path to a mounted volume.
+pbs_datastore_name: store01
+pbs_datastore_path: /var/lib/pbs/{{ pbs_datastore_name }}
+
+# Permissions: PBS runs as the `backup` system user once installed. Ansible
+# creates the datastore dir and chowns it before letting PBS take over.
+pbs_datastore_owner: backup
+pbs_datastore_group: backup
+pbs_datastore_mode: "0755"

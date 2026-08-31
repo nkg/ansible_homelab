@@ -1,0 +1,32 @@
+---
+ancestor: null
+releases:
+  0.1.0:
+    release_date: "2026-08-31"
+    changes:
+      release_summary: >-
+        First release. Seven Tier 1 homelab service roles extracted from a
+        loose working directory into a proper collection: pbs,
+        garage_native, komodo, postgres_native, restic, backups and alloy.
+      major_changes:
+        - >-
+          Roles are now vendor-neutral. The pbs role documented itself as
+          receiving backups from a specific hosting provider over a specific
+          overlay network; that is deployment configuration, not the role's
+          business, and the role never asserted any of it in code.
+      bugfixes:
+        - >-
+          restic - the molecule verify play registered ``restic_version``,
+          shadowing the role default of the same name for the remainder of
+          the play. Renamed to ``restic_version_check``. ansible-lint does
+          not catch this: the name already carries the required role prefix,
+          so it passes var-naming while being the exact collision that rule
+          exists to prevent.
+      minor_changes:
+        - >-
+          Added meta/main.yml to all seven roles (platforms, licence,
+          minimum ansible version) so they are installable individually.
+        - >-
+          Renamed twelve registers in the backups and restic molecule verify
+          plays to carry their role prefix, satisfying the production lint
+          profile without shadowing any existing default.

@@ -1,0 +1,66 @@
+// {{ ansible_managed }}
+// Grafana Alloy agent — Docker container log collection
+// Discovers running containers and ships their logs to Loki
+
+// ---------------------------------------------------------------------------
+// Discover Docker containers
+// ---------------------------------------------------------------------------
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// ---------------------------------------------------------------------------
+// Relabel: extract useful metadata as Loki labels
+// ---------------------------------------------------------------------------
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // Use container name (strip leading slash) as the "container" label
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    target_label  = "container"
+    regex         = "/(.*)"
+  }
+
+  // Compose project name
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+
+  // Compose service name
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+
+  // Log stream (stdout / stderr)
+  rule {
+    source_labels = ["__meta_docker_container_log_stream"]
+    target_label  = "stream"
+  }
+
+  // Host identification
+  rule {
+    target_label = "host"
+    replacement  = "{{ inventory_hostname }}"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Collect container logs via Docker API
+// ---------------------------------------------------------------------------
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.write.remote.receiver]
+}
+
+// ---------------------------------------------------------------------------
+// Push to remote Loki
+// ---------------------------------------------------------------------------
+loki.write "remote" {
+  endpoint {
+    url = "{{ alloy_loki_url }}"
+  }
+}

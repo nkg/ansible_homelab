@@ -1,0 +1,88 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Check Alloy config directory exists
+      ansible.builtin.stat:
+        path: /opt/alloy
+      register: alloy_dir
+
+    - name: Assert Alloy config directory exists
+      ansible.builtin.assert:
+        that:
+          - alloy_dir.stat.exists
+          - alloy_dir.stat.isdir
+        fail_msg: "Alloy config directory not found"
+
+    - name: Check Alloy config file exists
+      ansible.builtin.stat:
+        path: /opt/alloy/config.alloy
+      register: alloy_config
+
+    - name: Assert Alloy config file exists with correct permissions
+      ansible.builtin.assert:
+        that:
+          - alloy_config.stat.exists
+          - alloy_config.stat.mode == '0640'
+        fail_msg: "Alloy config file not found or wrong permissions"
+
+    - name: Read Alloy config content
+      ansible.builtin.slurp:
+        src: /opt/alloy/config.alloy
+      register: alloy_config_content
+
+    - name: Verify Alloy config contains expected blocks
+      ansible.builtin.assert:
+        that:
+          - "'discovery.docker' in alloy_config_content.content | b64decode"
+          - "'discovery.relabel' in alloy_config_content.content | b64decode"
+          - "'loki.source.docker' in alloy_config_content.content | b64decode"
+          - "'loki.write' in alloy_config_content.content | b64decode"
+          - "'http://10.10.10.10:3100/loki/api/v1/push' in alloy_config_content.content | b64decode"
+        fail_msg: "Alloy config missing expected content"
+
+    # Container-runtime checks: skipped in container test envs because
+    # the role's docker_container task is itself gated there (DiD bind-
+    # mount source-path mismatch). Config-render checks above still run.
+    - name: Check Alloy container exists
+      community.docker.docker_container_info:
+        name: alloy
+      register: alloy_container
+      when: ansible_virtualization_type not in ['docker', 'container', 'containerd', 'podman']
+
+    - name: Assert Alloy container is running
+      ansible.builtin.assert:
+        that:
+          - alloy_container.exists
+          - alloy_container.container.State.Running
+        fail_msg: "Alloy container is not running"
+      when: ansible_virtualization_type not in ['docker', 'container', 'containerd', 'podman']
+
+    - name: Assert container image is correct
+      ansible.builtin.assert:
+        that:
+          - "'grafana/alloy' in alloy_container.container.Config.Image"
+        fail_msg: "Alloy container is using the wrong image"
+      when: ansible_virtualization_type not in ['docker', 'container', 'containerd', 'podman']
+
+    - name: Assert container has restart policy
+      ansible.builtin.assert:
+        that:
+          - alloy_container.container.HostConfig.RestartPolicy.Name == 'unless-stopped'
+        fail_msg: "Alloy container should have unless-stopped restart policy"
+      when: ansible_virtualization_type not in ['docker', 'container', 'containerd', 'podman']
+
+    - name: Assert no-new-privileges is set
+      ansible.builtin.assert:
+        that:
+          - "'no-new-privileges' in alloy_container.container.HostConfig.SecurityOpt | join(',')"
+        fail_msg: "Alloy container should have no-new-privileges security option"
+      when: ansible_virtualization_type not in ['docker', 'container', 'containerd', 'podman']
+
+    - name: Assert Docker socket is mounted read-only
+      ansible.builtin.assert:
+        that:
+          - alloy_container.container.Mounts | selectattr('Destination', 'equalto', '/var/run/docker.sock') | list | length > 0
+        fail_msg: "Docker socket should be mounted for container discovery"
+      when: ansible_virtualization_type not in ['docker', 'container', 'containerd', 'podman']

@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+---
+namespace: nkg
+name: homelab
+version: 0.1.0
+readme: README.md
+
+authors:
+  - nkg <neil@galv.in>
+
+description: >-
+  Tier 1 service roles for a self-hosted homelab — backup server, object
+  storage, container orchestration, PostgreSQL, snapshots and observability.
+  Deliberately vendor-neutral: nothing here assumes a hosting provider.
+
+license:
+  - GPL-2.0-or-later
+
+tags:
+  - homelab
+  - backup
+  - restic
+  - postgresql
+  - observability
+  - infrastructure
+  - debian
+
+# Collections the roles in this collection call into directly.
+dependencies:
+  community.docker: ">=3.4.0"
+  community.postgresql: ">=3.0.0"
+
+repository: https://github.com/nkg/ansible_homelab
+documentation: https://github.com/nkg/ansible_homelab/blob/main/README.md
+homepage: https://github.com/nkg/ansible_homelab
+issues: https://github.com/nkg/ansible_homelab/issues
+
+# Files/dirs excluded from the built collection artifact.
+build_ignore:
+  - .ansible
+  - .github
+  - .gitignore
+  - .yamllint
+  - "roles/*/molecule"
+  - "*.tar.gz"
+  - .pytest_cache
+  - __pycache__

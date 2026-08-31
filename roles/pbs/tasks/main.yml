@@ -1,0 +1,74 @@
+---
+# =============================================================================
+# Role: pbs — Proxmox Backup Server install + initial datastore
+# =============================================================================
+# Receives backups from one or more Proxmox VE nodes. Where those nodes are,
+# and how they reach this host, is deployment configuration and not this
+# role's business: a flat LAN, a VPN or an overlay network all work, and the
+# role asserts nothing about any of them.
+
+- name: Add Proxmox apt signing key
+  ansible.builtin.get_url:
+    url: "{{ pbs_apt_key_url }}"
+    dest: /etc/apt/trusted.gpg.d/proxmox-release-{{ pbs_release }}.gpg
+    mode: "0644"
+  tags: [pbs, repo]
+
+- name: Add PBS apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb {{ pbs_apt_repo_url }} {{ pbs_apt_repo_components }}"
+    filename: pbs
+    state: present
+    update_cache: true
+  tags: [pbs, repo]
+
+- name: Remove the enterprise repo if present (we use no-subscription)
+  ansible.builtin.apt_repository:
+    repo: "deb https://enterprise.proxmox.com/debian/pbs {{ pbs_release }} pbs-enterprise"
+    state: absent
+  tags: [pbs, repo]
+
+- name: Install Proxmox Backup Server
+  ansible.builtin.apt:
+    name: proxmox-backup-server
+    state: present
+    update_cache: true
+  tags: [pbs, install]
+
+- name: Ensure PBS systemd service is enabled and running
+  ansible.builtin.systemd:
+    name: proxmox-backup-proxy
+    state: started
+    enabled: true
+  tags: [pbs, service]
+
+# --- Default datastore ---
+# PBS datastores need to exist on disk before being registered. Ansible
+# creates the directory; PBS takes over via `proxmox-backup-manager`.
+
+- name: Ensure datastore directory exists
+  ansible.builtin.file:
+    path: "{{ pbs_datastore_path }}"
+    state: directory
+    owner: "{{ pbs_datastore_owner }}"
+    group: "{{ pbs_datastore_group }}"
+    mode: "{{ pbs_datastore_mode }}"
+  tags: [pbs, datastore]
+
+- name: List existing PBS datastores
+  ansible.builtin.command:
+    cmd: proxmox-backup-manager datastore list --output-format json
+  register: pbs_existing_datastores
+  changed_when: false
+  tags: [pbs, datastore]
+
+- name: Create default PBS datastore (idempotent)
+  ansible.builtin.command:
+    cmd: >-
+      proxmox-backup-manager datastore create
+      {{ pbs_datastore_name }} {{ pbs_datastore_path }}
+  when: >-
+    pbs_datastore_name not in
+    (pbs_existing_datastores.stdout | from_json | map(attribute='name') | list)
+  changed_when: true
+  tags: [pbs, datastore]

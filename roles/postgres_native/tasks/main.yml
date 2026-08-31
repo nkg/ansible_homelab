@@ -1,0 +1,228 @@
+---
+# =============================================================================
+# Role: postgres_native — Postgres on Debian, no Docker
+# =============================================================================
+# Per-app database / role creation lives in each app's deploy path; this
+# role only brings up the cluster.
+
+- name: Validate superuser password is set
+  ansible.builtin.assert:
+    that:
+      - postgres_native_superuser_password | default('') | length > 0
+    fail_msg: >-
+      postgres_native_superuser_password is empty. Set it in SOPS as
+      `postgres.superuser_password` and reference it from
+      host_vars/<host>.yaml via postgres_native_superuser_password.
+    quiet: true
+  tags: [postgres, validate]
+
+# --- PGDG apt repo ---
+
+- name: PGDG apt key
+  ansible.builtin.get_url:
+    url: "{{ postgres_native_apt_key_url }}"
+    dest: /etc/apt/trusted.gpg.d/pgdg.asc
+    mode: "0644"
+  tags: [postgres, repo]
+
+- name: PGDG apt repo
+  ansible.builtin.apt_repository:
+    repo: "{{ postgres_native_apt_repo }}"
+    filename: pgdg
+    state: present
+    update_cache: true
+  tags: [postgres, repo]
+
+- name: Install PostgreSQL {{ postgres_native_major_version }}
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgres_native_major_version }}"
+      - "postgresql-client-{{ postgres_native_major_version }}"
+      - "postgresql-contrib-{{ postgres_native_major_version }}"
+      - python3-psycopg2  # required by community.postgresql modules
+    state: present
+  tags: [postgres, install]
+
+# --- postgresql.conf via postgresql_alter_system (idempotent) ---
+# Using the dedicated module rather than templating the whole file: lets
+# Debian's postgresql-common defaults stay in place; we only override the
+# specific settings we care about. postgresql_alter_system writes to
+# postgresql.auto.conf — wins over the base file without touching it.
+# (Replaces the deprecated postgresql_set, removed in community.postgresql 5.0.0.)
+
+- name: Apply postgresql.conf overrides
+  community.postgresql.postgresql_alter_system:
+    param: "{{ item.key }}"
+    value: "{{ item.value }}"
+    login_user: postgres
+  loop:
+    # `*` binds all interfaces (loopback + the LXC's single LAN
+    # NIC). Equivalent to `<lan-ip>,127.0.0.1` here, but avoids
+    # postgresql_alter_system's comma-split quirk: comma-separated
+    # values get serialised as `'a','b'` (two literals) which
+    # postgres stores differently from how it reads back, so every
+    # run reports "changed" and trips the Restart handler. Access
+    # is gated by pg_hba allow-list, not by listen scope.
+    - { key: listen_addresses, value: "*" }
+    - { key: port, value: "{{ postgres_native_port }}" }
+    - { key: max_connections, value: "{{ postgres_native_max_connections }}" }
+    - { key: shared_buffers, value: "{{ postgres_native_shared_buffers }}" }
+    - { key: effective_cache_size, value: "{{ postgres_native_effective_cache_size }}" }
+    - { key: maintenance_work_mem, value: "{{ postgres_native_maintenance_work_mem }}" }
+    - { key: work_mem, value: "{{ postgres_native_work_mem }}" }
+    - { key: wal_buffers, value: "{{ postgres_native_wal_buffers }}" }
+    - { key: min_wal_size, value: "{{ postgres_native_min_wal_size }}" }
+    - { key: max_wal_size, value: "{{ postgres_native_max_wal_size }}" }
+    - { key: checkpoint_completion_target, value: "{{ postgres_native_checkpoint_completion_target }}" }
+    - { key: random_page_cost, value: "{{ postgres_native_random_page_cost }}" }
+    - { key: effective_io_concurrency, value: "{{ postgres_native_effective_io_concurrency }}" }
+    - { key: log_connections, value: "{{ postgres_native_log_connections }}" }
+    - { key: log_disconnections, value: "{{ postgres_native_log_disconnections }}" }
+    - { key: log_min_duration_statement, value: "{{ postgres_native_log_min_duration_statement }}" }
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+  become: true
+  become_user: postgres
+  notify: Restart postgres
+  tags: [postgres, config]
+
+# --- pg_hba.conf — deny by default, allow-list per host_vars ---
+
+- name: Configure pg_hba.conf — local socket (peer)
+  community.postgresql.postgresql_pg_hba:
+    dest: "{{ postgres_native_config_dir }}/pg_hba.conf"
+    contype: local
+    databases: all
+    users: all
+    method: peer
+    state: present
+  notify: Reload postgres
+  tags: [postgres, pg_hba]
+
+- name: Configure pg_hba.conf — loopback (scram-sha-256)
+  community.postgresql.postgresql_pg_hba:
+    dest: "{{ postgres_native_config_dir }}/pg_hba.conf"
+    contype: host
+    databases: all
+    users: all
+    source: "{{ item }}"
+    method: scram-sha-256
+    state: present
+  loop:
+    - 127.0.0.1/32
+    - ::1/128
+  notify: Reload postgres
+  tags: [postgres, pg_hba]
+
+- name: Configure pg_hba.conf — allow-listed clients
+  community.postgresql.postgresql_pg_hba:
+    dest: "{{ postgres_native_config_dir }}/pg_hba.conf"
+    contype: host
+    databases: "{{ item.database | default('all') }}"
+    users: "{{ item.user | default('all') }}"
+    source: "{{ item.source }}"
+    method: scram-sha-256
+    comment: "{{ item.comment | default('') }}"
+    state: present
+  loop: "{{ postgres_native_allowed_clients }}"
+  loop_control:
+    label: "{{ item.source }} → {{ item.database | default('all') }}/{{ item.user | default('all') }}"
+  notify: Reload postgres
+  tags: [postgres, pg_hba]
+
+# --- Enable + start the service ---
+
+- name: Ensure postgresql is enabled and running
+  ansible.builtin.systemd:
+    name: "{{ postgres_native_service_name }}"
+    state: started
+    enabled: true
+  tags: [postgres, service]
+
+# --- Superuser password ---
+# Set the postgres role's password so remote ops connections can use
+# scram-sha-256 over TCP (local socket still uses peer auth).
+
+- name: Set postgres superuser password
+  community.postgresql.postgresql_user:
+    name: postgres
+    password: "{{ postgres_native_superuser_password }}"
+    # Same scram-sha-256 salt-rotation gotcha as per-app roles.
+    no_password_changes: true
+    login_user: postgres
+  become: true
+  become_user: postgres
+  no_log: true
+  tags: [postgres, auth]
+
+# --- Per-app role + database creation ---
+# Walk postgres_native_databases (declared in host_vars/data-pg.yaml).
+# For each entry: create the role with its password, create the database
+# owned by that role, and append a pg_hba line allowing only that role
+# into only that database from the declared source CIDR. All operations
+# are idempotent — run on every site.yml apply.
+
+- name: Ensure per-app roles
+  community.postgresql.postgresql_user:
+    name: "{{ item.owner }}"
+    password: "{{ item.password }}"
+    # scram-sha-256 re-salts on every hash, so without this the
+    # module compares the new (random-salted) hash against the
+    # stored one, sees a difference, and reports "changed" every
+    # run — which trips the Reload handler unnecessarily.
+    # no_password_changes skips that comparison; password is still
+    # set on initial role creation (it just won't rotate it after).
+    # Password rotation is a deliberate separate operation.
+    no_password_changes: true
+    state: present
+    encrypted: true
+    login_user: postgres
+  loop: "{{ postgres_native_databases }}"
+  loop_control:
+    label: "{{ item.owner }}"
+  become: true
+  become_user: postgres
+  no_log: true
+  tags: [postgres, tenants]
+
+- name: Ensure per-app databases
+  community.postgresql.postgresql_db:
+    name: "{{ item.name }}"
+    owner: "{{ item.owner }}"
+    # Force UTF-8. The cluster was initdb'd SQL_ASCII, so without an
+    # explicit encoding new DBs inherit SQL_ASCII and reject non-ASCII
+    # text (e.g. Paperless OCR with en-dashes/£/accents fails to store:
+    # "Unicode escape value could not be translated to ... SQL_ASCII").
+    # template0 is required to override encoding/locale on a SQL_ASCII
+    # cluster; C.UTF-8 is always present on Debian (no locale-gen needed).
+    #
+    # NOTE: only applies on CREATE. DBs that already exist as SQL_ASCII
+    # must be dropped + recreated — encoding can't be ALTERed in place.
+    encoding: "{{ item.encoding | default('UTF-8') }}"
+    lc_collate: "{{ item.lc_collate | default('C.UTF-8') }}"
+    lc_ctype: "{{ item.lc_ctype | default('C.UTF-8') }}"
+    template: "{{ item.template | default('template0') }}"
+    state: present
+    login_user: postgres
+  loop: "{{ postgres_native_databases }}"
+  loop_control:
+    label: "{{ item.name }} (owner={{ item.owner }})"
+  become: true
+  become_user: postgres
+  tags: [postgres, tenants]
+
+- name: Configure pg_hba.conf — per-app allow rules
+  community.postgresql.postgresql_pg_hba:
+    dest: "{{ postgres_native_config_dir }}/pg_hba.conf"
+    contype: host
+    databases: "{{ item.name }}"
+    users: "{{ item.owner }}"
+    source: "{{ item.allowed_from }}"
+    method: scram-sha-256
+    comment: "{{ item.comment | default(item.name + ' app') }}"
+    state: present
+  loop: "{{ postgres_native_databases }}"
+  loop_control:
+    label: "{{ item.allowed_from }} → {{ item.name }}/{{ item.owner }}"
+  notify: Reload postgres
+  tags: [postgres, pg_hba, tenants]

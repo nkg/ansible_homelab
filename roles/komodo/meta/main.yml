@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: komodo
+  namespace: nkg
+  author: nkg
+  description: Komodo Core via Docker Compose plus Periphery agent under systemd
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+  galaxy_tags: [docker, orchestration, komodo]
+
+dependencies: []

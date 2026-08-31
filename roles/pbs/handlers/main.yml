@@ -1,0 +1,4 @@
+---
+# proxmox-backup-server is managed via systemd; the service tasks above
+# handle restart-on-config-change. Placeholder for future handlers
+# (e.g. ACME cert renewal, datastore options).

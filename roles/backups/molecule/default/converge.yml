@@ -1,0 +1,16 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    backups_dir: /opt/backups
+    backups_postgres_container: postgres
+    backups_postgres_user: postgres
+    backups_retention_days: 30
+    backups_schedule: "0 2 * * *"
+    backups_databases:
+      - paperless
+      - authentik
+      - forgejo
+  roles:
+    - role: backups

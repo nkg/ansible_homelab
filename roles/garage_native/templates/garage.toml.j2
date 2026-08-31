@@ -1,0 +1,31 @@
+# {{ ansible_managed }}
+# Garage v2 config. See https://garagehq.deuxfleurs.fr/documentation/reference-manual/configuration/
+
+metadata_dir = "{{ garage_native_metadata_dir }}"
+data_dir = "{{ garage_native_data_dir }}"
+db_engine = "lmdb"
+
+# Single-node initially; bump alongside the layout when peers are added.
+replication_factor = {{ garage_native_replication_factor }}
+
+# Inter-node RPC. Single-node uses these only as self-identifiers, but
+# both fields are required. rpc_public_addr must be reachable from peers
+# once the cluster scales beyond one node.
+rpc_bind_addr   = "{{ garage_native_rpc_bind_addr }}"
+rpc_public_addr = "{{ garage_native_rpc_public_addr }}"
+rpc_secret      = "{{ garage_native_rpc_secret }}"
+
+[s3_api]
+s3_region    = "garage"
+api_bind_addr = "{{ garage_native_s3_bind_addr }}"
+root_domain  = "{{ garage_native_s3_root_domain }}"
+
+[s3_web]
+bind_addr   = "{{ garage_native_web_bind_addr }}"
+root_domain = "{{ garage_native_web_root_domain }}"
+index       = "index.html"
+
+[admin]
+api_bind_addr = "{{ garage_native_admin_bind_addr }}"
+admin_token   = "{{ garage_native_admin_token }}"
+metrics_token = "{{ garage_native_metrics_token }}"

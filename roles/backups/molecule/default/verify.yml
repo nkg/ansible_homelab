@@ -1,0 +1,116 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Check backup base directory exists
+      ansible.builtin.stat:
+        path: /opt/backups
+      register: backups_base_dir_stat
+
+    - name: Assert backup base directory exists
+      ansible.builtin.assert:
+        that:
+          - backups_base_dir_stat.stat.exists
+          - backups_base_dir_stat.stat.isdir
+          - backups_base_dir_stat.stat.mode == '0750'
+        fail_msg: "Backup base directory /opt/backups not found or wrong permissions"
+
+    - name: Check backup subdirectories exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: backups_subdirs_stat
+      loop:
+        - /opt/backups/databases
+        - /opt/backups/files
+
+    - name: Assert backup subdirectories exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+          - item.stat.mode == '0750'
+        fail_msg: "Backup subdirectory {{ item.item }} not found or wrong permissions"
+      loop: "{{ backups_subdirs_stat.results }}"
+
+    - name: Check backup script is deployed
+      ansible.builtin.stat:
+        path: /opt/backups/backup-databases.sh
+      register: backups_script_stat
+
+    - name: Assert backup script exists and is executable
+      ansible.builtin.assert:
+        that:
+          - backups_script_stat.stat.exists
+          - backups_script_stat.stat.mode == '0750'
+        fail_msg: "Backup script not found or not executable"
+
+    - name: Read backup script content
+      ansible.builtin.slurp:
+        src: /opt/backups/backup-databases.sh
+      register: backups_script_slurp
+
+    - name: Verify backup script contains expected content
+      ansible.builtin.assert:
+        that:
+          - "'pg_dump' in backups_script_slurp.content | b64decode"
+          - "'paperless' in backups_script_slurp.content | b64decode"
+          - "'authentik' in backups_script_slurp.content | b64decode"
+          - "'forgejo' in backups_script_slurp.content | b64decode"
+          - "'RETENTION_DAYS=30' in backups_script_slurp.content | b64decode"
+          - "'postgres' in backups_script_slurp.content | b64decode"
+        fail_msg: "Backup script missing expected content"
+
+    - name: Verify backup script has Ansible managed header
+      ansible.builtin.assert:
+        that:
+          - "'Ansible' in backups_script_slurp.content | b64decode"
+        fail_msg: "Backup script missing Ansible managed header"
+
+    - name: Verify backup script covers all expected databases
+      # Database list comes from converge.yml's backups_databases var
+      # ([paperless, authentik, forgejo]) — keep these aligned if either
+      # side changes.
+      ansible.builtin.assert:
+        that:
+          - "'paperless' in backups_script_slurp.content | b64decode"
+          - "'authentik' in backups_script_slurp.content | b64decode"
+          - "'forgejo' in backups_script_slurp.content | b64decode"
+        fail_msg: "Backup script missing some expected databases (paperless, authentik, forgejo)"
+
+    - name: Check cron job is configured
+      ansible.builtin.command: crontab -l
+      register: backups_cron_list
+      changed_when: false
+
+    - name: Assert backup cron job exists
+      ansible.builtin.assert:
+        that:
+          - "'backup-databases.sh' in backups_cron_list.stdout"
+          - "'0 2' in backups_cron_list.stdout"
+        fail_msg: "Backup cron job not found or wrong schedule"
+
+    - name: Check logrotate config exists
+      ansible.builtin.stat:
+        path: /etc/logrotate.d/backup-databases
+      register: backups_logrotate_stat
+
+    - name: Assert logrotate config exists
+      ansible.builtin.assert:
+        that:
+          - backups_logrotate_stat.stat.exists
+        fail_msg: "Backup logrotate config not found"
+
+    - name: Read logrotate config
+      ansible.builtin.slurp:
+        src: /etc/logrotate.d/backup-databases
+      register: backups_logrotate_slurp
+
+    - name: Verify logrotate config contains expected content
+      ansible.builtin.assert:
+        that:
+          - "'/var/log/backup-databases.log' in backups_logrotate_slurp.content | b64decode"
+          - "'weekly' in backups_logrotate_slurp.content | b64decode"
+          - "'rotate 4' in backups_logrotate_slurp.content | b64decode"
+          - "'compress' in backups_logrotate_slurp.content | b64decode"
+        fail_msg: "Logrotate config missing expected content"

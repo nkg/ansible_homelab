@@ -1,0 +1,86 @@
+---
+# postgres_native — install + configure PostgreSQL natively from PGDG apt
+# repo on a dedicated LXC. Per-app DB / role creation lives in each app's
+# deploy path (Komodo Stack init container, app-specific ansible role, etc.)
+# — this role just brings up a tuned, listen-on-LAN, scram-sha-256-only PG
+# host with an empty cluster ready for tenants.
+
+# --- Version + paths ---
+postgres_native_major_version: 17
+postgres_native_data_dir: "/var/lib/postgresql/{{ postgres_native_major_version }}/main"
+postgres_native_config_dir: "/etc/postgresql/{{ postgres_native_major_version }}/main"
+postgres_native_service_name: "postgresql@{{ postgres_native_major_version }}-main"
+
+# --- PGDG apt repo ---
+postgres_native_apt_repo: "deb https://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+postgres_native_apt_key_url: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+
+# --- Network ---
+# LAN-bound by default. The apps reach PG via the LXC's LAN IP. Tailnet IPs
+# intentionally NOT in this list — tailnet is for ops access (SSH+psql to
+# the LXC), not app traffic. Override per-host if needed.
+postgres_native_listen_addresses: "{{ ansible_default_ipv4.address }}"
+postgres_native_port: 5432
+
+# --- Auth ---
+# pg_hba allow-list. Each entry becomes one `host ... scram-sha-256` line.
+# Default empty (no remote access) — override in host_vars/data-pg.yaml as
+# apps come online and need PG access. Per-app subnet allow is finer-grained
+# than per-LAN; recommend listing the specific app VM's /32.
+#
+# Example override:
+#   postgres_native_allowed_clients:
+#     - { source: "10.10.10.10/32", database: "all", user: "all", comment: "apps VM" }
+#     - { source: "10.10.10.30/32", database: "all", user: "all", comment: "llm VM" }
+postgres_native_allowed_clients: []
+
+# Superuser password (postgres role). Stored in SOPS — not literal here.
+# Override in host_vars/data-pg.yaml:
+#   postgres_native_superuser_password: "{{ secrets.postgres.superuser_password }}"
+postgres_native_superuser_password: ""
+
+# --- Tuning ---
+# Sized for the data-pg LXC defaults (4 cores, 4 GB RAM). Adjust per host.
+# Rule-of-thumb starting points; profile real workloads before fine tuning.
+postgres_native_max_connections: 200
+postgres_native_shared_buffers: "1GB"          # ~25% of RAM
+postgres_native_effective_cache_size: "3GB"    # ~75% of RAM (PG knows this is OS cache estimate, not allocated)
+postgres_native_maintenance_work_mem: "256MB"
+postgres_native_work_mem: "4MB"
+postgres_native_wal_buffers: "16MB"
+postgres_native_min_wal_size: "1GB"
+postgres_native_max_wal_size: "4GB"
+postgres_native_checkpoint_completion_target: 0.9
+postgres_native_random_page_cost: 1.1          # SSD
+postgres_native_effective_io_concurrency: 200  # SSD
+
+# --- Logging ---
+postgres_native_log_connections: "on"
+postgres_native_log_disconnections: "on"
+postgres_native_log_min_duration_statement: 500   # ms — slow query log threshold
+
+# --- Per-app role + database creation ---
+# Declarative list of tenant databases. Each entry creates a role with the
+# given password (scram-sha-256), creates a database owned by that role,
+# and appends a pg_hba.conf line allowing only that role into only that
+# database from the given source CIDR. Passwords come from SOPS.
+#
+# Default empty — override in host_vars/data-pg.yaml. Example:
+#   postgres_native_databases:
+#     - name: forgejo
+#       owner: forgejo
+#       password: "{{ secrets.forgejo.db_password }}"
+#       allowed_from: "10.10.10.10/32"   # apps VM
+#     - name: linkwarden
+#       owner: linkwarden
+#       password: "{{ secrets.linkwarden.db_password }}"
+#       allowed_from: "10.10.10.10/32"
+#
+# This is the supported path for per-app DB provisioning — replaces the
+# legacy in-stack `<app>-db-init` postgres init container, which exposed
+# the cluster superuser password to every Komodo .env.
+postgres_native_databases: []
+
+# --- ansible-galaxy collection requirement ---
+# This role uses community.postgresql modules. Ensure
+# ansible/requirements.yml has community.postgresql listed.

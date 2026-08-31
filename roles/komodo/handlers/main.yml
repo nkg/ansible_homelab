@@ -1,0 +1,23 @@
+---
+- name: Restart komodo stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ komodo_base_dir }}"
+    state: restarted
+
+# Listener order: handlers fire in the order they're defined here, not
+# the order they're notified. daemon-reload must run before any restart
+# so the new ExecStart from the systemd drop-in is picked up.
+- name: Reload komodo user systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: komodo
+
+- name: Restart komodo periphery
+  ansible.builtin.systemd:
+    name: periphery
+    state: restarted
+    scope: user
+  become: true
+  become_user: komodo

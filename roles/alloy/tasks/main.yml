@@ -1,0 +1,42 @@
+---
+- name: Create Alloy config directory
+  ansible.builtin.file:
+    path: "{{ alloy_config_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Deploy Alloy configuration
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: "{{ alloy_config_dir }}/config.alloy"
+    mode: "0640"
+  register: alloy_config
+
+- name: Run Alloy container
+  # Skip the actual container start in container test envs (molecule
+  # under docker-in-docker). The bind-mount source path is interpreted
+  # on the OUTER host where /opt/alloy/config.alloy doesn't exist,
+  # producing "not a directory" mount errors. The role's other tasks
+  # (config render, dir create) are still verified.
+  when: ansible_virtualization_type not in ['docker', 'container', 'containerd', 'podman']
+  community.docker.docker_container:
+    name: alloy
+    image: "{{ alloy_image }}"
+    state: started
+    restart_policy: unless-stopped
+    security_opts:
+      - no-new-privileges:true
+    capabilities:
+      - DAC_READ_SEARCH
+    cap_drop:
+      - ALL
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:12345
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - "{{ alloy_config_dir }}/config.alloy:/etc/alloy/config.alloy:ro"
+      - alloy_data:/var/lib/alloy/data
+    restart: "{{ alloy_config is changed }}"

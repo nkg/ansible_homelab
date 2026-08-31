@@ -1,0 +1,67 @@
+---
+- name: Install restic
+  ansible.builtin.apt:
+    name: restic
+    state: present
+    update_cache: true
+
+- name: Create restic backup directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0750"
+  loop:
+    - "{{ restic_backup_dir }}/restic"
+    - "{{ restic_backup_dir }}/restic/pre-dumps"
+
+- name: Deploy restic backup script
+  ansible.builtin.template:
+    src: restic-backup.sh.j2
+    dest: "{{ restic_backup_dir }}/restic/restic-backup.sh"
+    mode: "0750"
+
+- name: Initialize restic repository
+  ansible.builtin.command:
+    cmd: restic init
+  environment:
+    RESTIC_REPOSITORY: "{{ restic_repository }}"
+    RESTIC_PASSWORD: "{{ restic_password }}"
+  register: restic_init
+  failed_when:
+    - restic_init.rc != 0
+    - "'already initialized' not in restic_init.stderr"
+    - "'config file already exists' not in restic_init.stderr"
+  changed_when: "'created restic repository' in restic_init.stdout"
+  when:
+    - restic_repository | length > 0
+    - restic_password | length > 0
+
+- name: Create restic backup cron job
+  ansible.builtin.cron:
+    name: "Restic backup"
+    minute: "{{ restic_schedule.split()[0] }}"
+    hour: "{{ restic_schedule.split()[1] }}"
+    day: "{{ restic_schedule.split()[2] }}"
+    month: "{{ restic_schedule.split()[3] }}"
+    weekday: "{{ restic_schedule.split()[4] }}"
+    job: "{{ restic_backup_dir }}/restic/restic-backup.sh >> /var/log/restic-backup.log 2>&1"
+    user: root
+  when:
+    - restic_repository | length > 0
+    - restic_password | length > 0
+
+- name: Create restic backup log rotation
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/restic-backup
+    mode: "0644"
+    content: |
+      /var/log/restic-backup.log {
+        weekly
+        rotate 4
+        compress
+        missingok
+        notifempty
+      }
+  when:
+    - restic_repository | length > 0
+    - restic_password | length > 0

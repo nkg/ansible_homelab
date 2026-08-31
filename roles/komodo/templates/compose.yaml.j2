@@ -1,0 +1,68 @@
+---
+# {{ ansible_managed }}
+# Komodo Core + MongoDB stack.
+# Periphery runs separately as a systemd service (bpbradley.komodo).
+
+services:
+  mongo:
+    image: {{ komodo_mongo_image }}
+    container_name: komodo-mongo
+    restart: unless-stopped
+    # Prevent Komodo's own StopAllContainers from killing the DB it depends on.
+    labels:
+      komodo.skip:
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${KOMODO_DATABASE_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${KOMODO_DATABASE_PASSWORD}
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+
+  core:
+    image: {{ komodo_core_image }}:{{ komodo_core_version }}
+    container_name: komodo-core
+    init: true
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    ports:
+      - "{{ komodo_core_port }}:9120"
+    env_file:
+      - ./.env
+    environment:
+      KOMODO_DATABASE_ADDRESS: mongo:27017
+    # Periphery runs as a systemd service on the host (bpbradley.komodo).
+    # Map host.docker.internal → the Docker bridge gateway so Core (in a
+    # bridged container) can reach Periphery at host.docker.internal:{{ komodo_periphery_port }}.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Persistent storage for Core's Ed25519 keypair (v2 PKI auth).
+      - keys:/config/keys
+      # Komodo's dated DB backups + manual mongodump archives —
+      # https://komo.do/docs/setup/backup. Bind-mounted so the
+      # mongo_backup ansible role can write archives to the host filesystem.
+      - {{ komodo_base_dir }}/backups:/backups
+
+{% if komodo_cloudflared_enabled | default(false) %}
+  # Cloudflare Zero Trust tunnel sidecar — connects this VM to the
+  # tunnel registered in Cloudflare (managed in
+  # infrastructure/cloudflare/terraform/komodo_tunnel.tf). Ingress rules
+  # there route komodo.regularmusic.com → http://komodo-core:9120 over
+  # this docker network. No host port published; cloudflared is the
+  # only path in.
+  cloudflared:
+    image: {{ komodo_cloudflared_image }}
+    container_name: komodo-cloudflared
+    restart: unless-stopped
+    depends_on:
+      - core
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: "{{ komodo_cloudflared_tunnel_token }}"
+{% endif %}
+
+volumes:
+  mongo-data:
+  mongo-config:
+  keys:

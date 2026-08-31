@@ -1,0 +1,7 @@
+---
+# ansible-lint configuration for the nkg.homelab collection.
+profile: production
+
+exclude_paths:
+  - .ansible/
+  - .github/

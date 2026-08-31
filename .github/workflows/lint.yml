@@ -1,0 +1,16 @@
+---
+name: Lint
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ansible:
+    uses: nkg/github-actions/.github/workflows/ansible.yml@v2
+    with:
+      requirements-file: requirements.yml
+      # No playbooks in this collection — it ships roles only, so there is
+      # nothing for --syntax-check to take as an entry point.
+      run-syntax-check: false

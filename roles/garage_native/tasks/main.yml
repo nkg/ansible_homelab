@@ -1,0 +1,218 @@
+---
+# =============================================================================
+# Role: garage_native — Garage S3 storage on Debian, no Docker
+# =============================================================================
+
+- name: Validate auth secrets are set
+  ansible.builtin.assert:
+    that:
+      - garage_native_rpc_secret | length > 0
+      - garage_native_admin_token | length > 0
+      - garage_native_metrics_token | length > 0
+    fail_msg: >-
+      garage_native_rpc_secret / admin_token / metrics_token must be set.
+      Generate with `openssl rand -hex 32` (rpc_secret) and `openssl rand
+      -base64 32` (tokens), store in SOPS as `secrets.garage.*`, reference
+      from host_vars/<host>.yaml.
+    quiet: true
+  tags: [garage, validate]
+
+# --- System user + dirs ---
+
+- name: Create garage system group
+  ansible.builtin.group:
+    name: "{{ garage_native_group }}"
+    system: true
+  tags: [garage, install]
+
+- name: Create garage system user
+  ansible.builtin.user:
+    name: "{{ garage_native_user }}"
+    group: "{{ garage_native_group }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+  tags: [garage, install]
+
+- name: Create garage directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ garage_native_user }}"
+    group: "{{ garage_native_group }}"
+    mode: "0750"
+  loop:
+    - /etc/garage
+    - "{{ garage_native_metadata_dir }}"
+    - "{{ garage_native_data_dir }}"
+  tags: [garage, install]
+
+# --- Binary ---
+# Garage publishes static musl binaries directly; no apt repo. Bumping
+# garage_native_version triggers a re-download and a service restart via
+# the handler (the dest checksum changes only when version changes).
+
+- name: Download Garage binary
+  ansible.builtin.get_url:
+    url: "{{ garage_native_binary_url }}"
+    dest: "{{ garage_native_binary_path }}"
+    mode: "0755"
+    owner: root
+    group: root
+  notify: Restart garage
+  tags: [garage, install]
+
+# --- Config + service ---
+
+- name: Template garage.toml
+  ansible.builtin.template:
+    src: garage.toml.j2
+    dest: "{{ garage_native_config_path }}"
+    owner: "{{ garage_native_user }}"
+    group: "{{ garage_native_group }}"
+    mode: "0640"   # rpc_secret + tokens — keep readable to the daemon only
+  notify: Restart garage
+  tags: [garage, config]
+
+- name: Install garage systemd unit
+  ansible.builtin.template:
+    src: garage.service.j2
+    dest: /etc/systemd/system/garage.service
+    mode: "0644"
+  notify: Restart garage
+  tags: [garage, service]
+
+- name: Ensure garage is enabled and running
+  ansible.builtin.systemd:
+    name: garage
+    state: started
+    enabled: true
+    daemon_reload: true
+  tags: [garage, service]
+
+# Run pending handlers before the layout step — cluster commands need the
+# daemon listening on the configured admin port.
+- name: Apply pending handlers (restart if config/binary changed)
+  ansible.builtin.meta: flush_handlers
+  tags: [garage, service]
+
+# --- Initial cluster layout ---
+# Garage refuses S3 writes until a layout is applied. The layout assigns
+# this node a role (zone + capacity) so the cluster knows where to place
+# data. Idempotency: a marker file under metadata_dir signals "applied" —
+# subsequent runs skip the layout commands.
+
+- name: Wait for garage admin port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 3903
+    delay: 1
+    timeout: 30
+  tags: [garage, layout]
+
+- name: Read this node's id
+  ansible.builtin.command:
+    cmd: "{{ garage_native_binary_path }} -c {{ garage_native_config_path }} node id"
+  register: garage_native_node_id_raw
+  changed_when: false
+  tags: [garage, layout]
+
+# Idempotency: ask garage what the current layout version is. On a
+# fresh cluster, `layout show` reports version 0 (no layout). After
+# `layout apply --version 1`, it reports version 1+. Skip the
+# assign/apply if a layout already exists.
+- name: Check current layout version
+  ansible.builtin.command:
+    cmd: "{{ garage_native_binary_path }} -c {{ garage_native_config_path }} layout show"
+  register: garage_native_layout_show
+  changed_when: false
+  tags: [garage, layout]
+
+- name: Apply initial layout
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      NODE_ID=$(echo "{{ garage_native_node_id_raw.stdout }}" | cut -d'@' -f1 | cut -c1-8)
+      {{ garage_native_binary_path }} -c {{ garage_native_config_path }} layout assign \
+        "$NODE_ID" -z {{ garage_native_zone }} -c {{ garage_native_layout_capacity }}
+      {{ garage_native_binary_path }} -c {{ garage_native_config_path }} layout apply --version 1
+  # `layout show` on a fresh cluster prints something like
+  # "==== CURRENT CLUSTER LAYOUT ====\nNo nodes configured" or
+  # version 0. Once applied, it lists the node ids + zones. Cheap
+  # heuristic: presence of the configured zone string implies an
+  # applied layout. Tighten if this proves brittle.
+  when: garage_native_zone not in garage_native_layout_show.stdout
+  changed_when: true
+  tags: [garage, layout]
+
+# --- Per-app keys + buckets ---
+# Walk garage_native_keys (declared in host_vars/data-s3.yaml). For each
+# entry: import the pre-known access/secret pair, create each declared
+# bucket, and grant the key owner read+write. All operations are
+# idempotent (presence-checked before mutation).
+
+- name: List existing garage keys
+  ansible.builtin.command:
+    cmd: "{{ garage_native_binary_path }} -c {{ garage_native_config_path }} key list"
+  register: garage_native_existing_keys
+  changed_when: false
+  when: garage_native_keys | length > 0
+  tags: [garage, keys]
+
+- name: Import per-app keys (deterministic — values come from SOPS)
+  # garage v2 CLI takes key-id + secret as POSITIONAL args, not
+  # flags. `-n` sets the key's friendly name; `--yes` confirms.
+  #   garage key import --yes -n <name> <key-id> <secret>
+  ansible.builtin.command:
+    cmd: >-
+      {{ garage_native_binary_path }} -c {{ garage_native_config_path }}
+      key import --yes
+      -n {{ item.name }}
+      {{ item.access_key_id }}
+      {{ item.secret_access_key }}
+  loop: "{{ garage_native_keys }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - garage_native_keys | length > 0
+    - item.name not in garage_native_existing_keys.stdout
+  changed_when: true   # only runs when key absent (gated above) — always a change
+  no_log: true
+  tags: [garage, keys]
+
+- name: List existing garage buckets
+  ansible.builtin.command:
+    cmd: "{{ garage_native_binary_path }} -c {{ garage_native_config_path }} bucket list"
+  register: garage_native_existing_buckets
+  changed_when: false
+  when: garage_native_keys | length > 0
+  tags: [garage, buckets]
+
+- name: Create per-app buckets
+  ansible.builtin.command:
+    cmd: >-
+      {{ garage_native_binary_path }} -c {{ garage_native_config_path }}
+      bucket create {{ item.1 }}
+  loop: "{{ garage_native_keys | subelements('buckets') }}"
+  loop_control:
+    label: "{{ item.1 }} (key={{ item.0.name }})"
+  when:
+    - garage_native_keys | length > 0
+    - item.1 not in garage_native_existing_buckets.stdout
+  changed_when: true   # only runs when bucket absent (gated above) — always a change
+  tags: [garage, buckets]
+
+# `bucket allow` is idempotent in garage 2.x — re-running with the same
+# args is a no-op. Run unconditionally to converge state.
+- name: Grant per-app keys owner access on their buckets
+  ansible.builtin.command:
+    cmd: >-
+      {{ garage_native_binary_path }} -c {{ garage_native_config_path }}
+      bucket allow --read --write --owner
+      --key {{ item.0.name }} {{ item.1 }}
+  loop: "{{ garage_native_keys | subelements('buckets') }}"
+  loop_control:
+    label: "{{ item.0.name }} ↔ {{ item.1 }}"
+  when: garage_native_keys | length > 0
+  changed_when: false  # bucket allow's stdout doesn't reliably distinguish change states
+  tags: [garage, buckets]

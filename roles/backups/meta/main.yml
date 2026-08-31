@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: backups
+  namespace: nkg
+  author: nkg
+  description: Local database and file backup scripts on a schedule
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+  galaxy_tags: [backup, database, cron]
+
+dependencies: []

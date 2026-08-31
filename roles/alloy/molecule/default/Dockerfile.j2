@@ -1,0 +1,28 @@
+FROM {{ item.image }}
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        systemd systemd-sysv \
+        openssh-server \
+        sudo \
+        python3 \
+        python3-pip \
+        dbus && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    # Remove unnecessary systemd units
+    rm -f /lib/systemd/system/multi-user.target.wants/* \
+          /etc/systemd/system/*.wants/* \
+          /lib/systemd/system/local-fs.target.wants/* \
+          /lib/systemd/system/sockets.target.wants/*udev* \
+          /lib/systemd/system/sockets.target.wants/*initctl* \
+          /lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup* \
+          /lib/systemd/system/systemd-update-utmp*
+
+# Install Docker SDK for Python (needed for community.docker modules)
+RUN pip3 install --break-system-packages docker
+
+# Ensure SSH host keys exist
+RUN ssh-keygen -A
+
+CMD ["/lib/systemd/systemd"]

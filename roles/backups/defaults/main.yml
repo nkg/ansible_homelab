@@ -1,0 +1,15 @@
+---
+backups_dir: /opt/backups
+backups_postgres_container: postgres
+backups_postgres_user: postgres
+backups_retention_days: 30
+backups_schedule: "0 2 * * *"
+
+# Bug Fix #9: All databases that need backing up
+backups_databases:
+  - paperless
+  - authentik
+  - forgejo
+  - linkwarden
+  - calcom
+  - immich

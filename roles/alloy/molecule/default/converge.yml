@@ -1,0 +1,10 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    alloy_loki_url: "http://10.10.10.10:3100/loki/api/v1/push"
+    alloy_config_dir: /opt/alloy
+    alloy_image: "grafana/alloy:latest"
+  roles:
+    - role: alloy

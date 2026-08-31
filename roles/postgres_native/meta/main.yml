@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: postgres_native
+  namespace: nkg
+  author: nkg
+  description: PostgreSQL cluster on Debian, native packages (no Docker)
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+  galaxy_tags: [postgresql, database, debian]
+
+dependencies: []

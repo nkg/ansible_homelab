@@ -1,0 +1,27 @@
+---
+restic_version: "0.17.3"
+restic_repository: ""
+restic_password: ""
+restic_backup_dir: /opt/backups
+restic_data_dir: /data
+restic_schedule: "0 3 * * *"
+restic_retention_daily: 7
+restic_retention_weekly: 4
+restic_retention_monthly: 6
+
+# Bug Fix #3: Use shared postgres container for all DBs
+restic_postgres_container: postgres
+restic_postgres_user: postgres
+restic_databases:
+  - paperless
+  - authentik
+  - forgejo
+  - linkwarden
+  - calcom
+  - immich
+
+restic_exclude_patterns:
+  - "*.tmp"
+  - "*.log"
+  - "__pycache__"
+  - ".cache"

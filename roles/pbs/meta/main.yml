@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: pbs
+  namespace: nkg
+  author: nkg
+  description: Proxmox Backup Server install and initial datastore
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+  galaxy_tags: [backup, proxmox, pbs, debian]
+
+dependencies: []

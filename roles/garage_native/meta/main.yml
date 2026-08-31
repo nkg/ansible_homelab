@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: garage_native
+  namespace: nkg
+  author: nkg
+  description: Garage S3-compatible object storage, native systemd (no Docker)
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+  galaxy_tags: [s3, storage, garage, debian]
+
+dependencies: []

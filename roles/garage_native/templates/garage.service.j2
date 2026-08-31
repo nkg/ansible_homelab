@@ -1,0 +1,25 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Garage S3 object storage
+Documentation=https://garagehq.deuxfleurs.fr/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ garage_native_user }}
+Group={{ garage_native_group }}
+ExecStart={{ garage_native_binary_path }} -c {{ garage_native_config_path }} server
+Restart=on-failure
+RestartSec=5
+
+# Hardening — keep modest. Garage is a long-lived daemon writing to its
+# own data dirs; lock that down without breaking startup paths.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ garage_native_metadata_dir }} {{ garage_native_data_dir }}
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

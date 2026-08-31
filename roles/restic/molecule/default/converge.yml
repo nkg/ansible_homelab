@@ -1,0 +1,23 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    restic_repository: ""
+    restic_password: ""
+    restic_backup_dir: /opt/backups
+    restic_data_dir: /data
+    restic_schedule: "0 3 * * *"
+    restic_retention_daily: 7
+    restic_retention_weekly: 4
+    restic_retention_monthly: 6
+    restic_postgres_container: postgres
+    restic_postgres_user: postgres
+    restic_databases:
+      - paperless
+      - authentik
+    restic_exclude_patterns:
+      - "*.tmp"
+      - "*.log"
+  roles:
+    - role: restic

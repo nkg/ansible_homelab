@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: restic
+  namespace: nkg
+  author: nkg
+  description: restic snapshots with a scheduled backup script and retention
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+  galaxy_tags: [backup, restic, snapshots]
+
+dependencies: []

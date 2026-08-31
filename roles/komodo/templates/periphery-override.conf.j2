@@ -1,0 +1,11 @@
+{{ ansible_managed | comment }}
+# Systemd user-unit drop-in for Komodo Periphery on the Komodo VM.
+# Adds a second --config-path so our overrides.toml is loaded after
+# bpbradley.komodo's generated periphery.config.toml.
+#
+# The empty ExecStart= line is required: it resets the unit's existing
+# ExecStart so our second line replaces (not appends to) the original.
+
+[Service]
+ExecStart=
+ExecStart=/bin/sh -lc "/home/komodo/.local/bin/periphery --config-path /home/komodo/.config/komodo/periphery.config.toml --config-path /home/komodo/.config/komodo/overrides.toml"

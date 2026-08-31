@@ -1,0 +1,15 @@
+---
+# Standalone Galaxy roles these roles call into. Collection-level
+# dependencies live in galaxy.yml; this file is for plain roles, which
+# galaxy.yml cannot express.
+roles:
+  # roles/komodo delegates Periphery installation to this rather than
+  # reimplementing it, then layers its own overrides.toml on top via a
+  # second --config-path. See roles/komodo/README.md.
+  - name: bpbradley.komodo
+
+collections:
+  - name: community.docker
+    version: ">=3.4.0"
+  - name: community.postgresql
+    version: ">=3.0.0"

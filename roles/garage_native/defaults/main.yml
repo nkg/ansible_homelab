@@ -1,0 +1,84 @@
+---
+# garage_native — install + configure Garage S3 (https://garagehq.deuxfleurs.fr/)
+# natively from the upstream static binary on a dedicated LXC. Per-bucket /
+# per-app credential creation lives in each app's deploy path — this role
+# only brings up a tuned, listen-on-LAN, single-node Garage with an empty
+# layout ready for tenants.
+
+# --- Version + binary ---
+# Pin to a specific 2.x release. Bumping is a defaults-only change followed
+# by a re-run; the get_url task will re-download and the handler restarts.
+garage_native_version: "v2.0.0"
+garage_native_arch: "x86_64-unknown-linux-musl"   # static musl binary
+garage_native_binary_url: "https://garagehq.deuxfleurs.fr/_releases/{{ garage_native_version }}/{{ garage_native_arch }}/garage"
+garage_native_binary_path: /usr/local/bin/garage
+
+# --- System user / paths ---
+garage_native_user: garage
+garage_native_group: garage
+garage_native_metadata_dir: /var/lib/garage/meta
+garage_native_data_dir: /var/lib/garage/data
+garage_native_config_path: /etc/garage/garage.toml
+
+# --- Network bindings ---
+# RPC is the inter-node channel (only matters when scaling beyond one node).
+# S3 + admin + web are operational surfaces — apps and ops talk to these.
+garage_native_rpc_bind_addr: "[::]:3901"
+garage_native_s3_bind_addr: "[::]:3900"
+garage_native_admin_bind_addr: "[::]:3903"
+garage_native_web_bind_addr: "[::]:3902"
+
+# Public RPC address that other Garage nodes would dial. Single-node uses it
+# only as a self-identifier, but the field is required.
+garage_native_rpc_public_addr: "{{ ansible_default_ipv4.address }}:3901"
+
+# --- Cluster shape ---
+# Single-node initially; bump and re-layout when peers are added (separate
+# operational task — not done by this role).
+garage_native_replication_factor: 1
+garage_native_zone: dc1
+# Capacity drives Garage's placement decisions across nodes. Single-node
+# accepts any value; for multi-node, set to roughly the available data-dir
+# size per node (e.g. "200G").
+garage_native_layout_capacity: "200G"
+
+# --- S3 / web addressing ---
+# Buckets become <bucket>.s3.<root_domain> for virtual-hosted-style addressing.
+# Path-style (https://host:3900/bucket/key) works without DNS — most apps
+# can use that and skip these entirely.
+garage_native_s3_root_domain: ".s3.garage.local"
+garage_native_web_root_domain: ".web.garage.local"
+
+# --- Auth secrets (override via SOPS in host_vars/<host>.yaml) ---
+# rpc_secret: 64-char hex, `openssl rand -hex 32`. Required even single-node;
+# Garage refuses to start without one.
+# admin_token / metrics_token: bearer tokens for the admin and metrics APIs;
+# `openssl rand -base64 32`.
+garage_native_rpc_secret: ""
+garage_native_admin_token: ""
+garage_native_metrics_token: ""
+
+# --- Per-app key + bucket creation ---
+# Declarative list of S3 tenants. Each entry imports a pre-known
+# access-key-id / secret-access-key pair (so secrets stay deterministic
+# in SOPS — no `garage key new` one-shot output to capture), creates the
+# named buckets, and grants the key owner read+write on each bucket.
+# Idempotent.
+#
+# Default empty — override in host_vars/data-s3.yaml. Example:
+#   garage_native_keys:
+#     - name: outline
+#       access_key_id:     "{{ secrets.outline.s3_access_key_id }}"
+#       secret_access_key: "{{ secrets.outline.s3_secret_access_key }}"
+#       buckets:
+#         - outline
+#
+# Generate the access_key_id / secret_access_key in SOPS up front.
+# Garage enforces a specific access-key-id format: `GK` prefix
+# followed by 24 hex chars (12 bytes). Secret is free-form (use
+# 64 hex chars for parity with `garage key new`):
+#   access_key_id:     "GK$(openssl rand -hex 12)"   # GK + 24 hex
+#   secret_access_key: "$(openssl rand -hex 32)"     # 64 hex
+# Without the GK prefix, `garage key import` errors with
+# `InvalidRequest (400): Invalid key format`.
+garage_native_keys: []

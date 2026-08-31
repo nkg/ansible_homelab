@@ -1,0 +1,49 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Restic backup script
+# Bug Fix #3: Uses shared '{{ restic_postgres_container }}' container for all database dumps
+
+set -euo pipefail
+
+export RESTIC_REPOSITORY="{{ restic_repository }}"
+export RESTIC_PASSWORD="{{ restic_password }}"
+
+BACKUP_DIR="{{ restic_backup_dir }}/restic/pre-dumps"
+DATA_DIR="{{ restic_data_dir }}"
+DATE=$(date +%Y-%m-%d_%H%M%S)
+
+# Ensure pre-dumps are cleaned up on any exit (success, failure, or interrupt)
+cleanup_pre_dumps() {
+  echo "Cleaning up pre-dumps..."
+  rm -f "${BACKUP_DIR}"/*.sql.gz 2>/dev/null || true
+}
+trap cleanup_pre_dumps EXIT
+
+echo "=== Restic backup started at $(date) ==="
+
+# Step 1: Pre-dump all databases from shared postgres container
+{% for db in restic_databases %}
+echo "Dumping database: {{ db }}"
+docker exec {{ restic_postgres_container }} pg_dump -U {{ restic_postgres_user }} {{ db }} 2>/dev/null | gzip > "${BACKUP_DIR}/{{ db }}_${DATE}.sql.gz" || echo "  WARNING: {{ db }} dump failed"
+{% endfor %}
+
+# Step 2: Backup pre-dumps + application data to restic
+echo "Running restic backup..."
+restic backup \
+  "${BACKUP_DIR}" \
+  "${DATA_DIR}" \
+{% for pattern in restic_exclude_patterns %}
+  --exclude="{{ pattern }}" \
+{% endfor %}
+  --tag "scheduled" \
+  --tag "${DATE}"
+
+# Step 3: Prune old snapshots
+echo "Pruning old snapshots..."
+restic forget \
+  --keep-daily {{ restic_retention_daily }} \
+  --keep-weekly {{ restic_retention_weekly }} \
+  --keep-monthly {{ restic_retention_monthly }} \
+  --prune
+
+echo "=== Restic backup completed at $(date) ==="
