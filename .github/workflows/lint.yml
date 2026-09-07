@@ -8,7 +8,7 @@ name: Lint
 
 jobs:
   ansible:
-    uses: nkg/github-actions/.github/workflows/ansible.yml@v2
+    uses: nkg/github-actions/.github/workflows/ansible.yml@v3
     with:
       requirements-file: requirements.yml
       # No playbooks in this collection — it ships roles only, so there is
