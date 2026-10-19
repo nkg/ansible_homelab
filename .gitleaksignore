@@ -1,0 +1,7 @@
+# False positives from betterleaks' full-history scan (secret-scan.yml, push mode).
+# Fingerprints are <commit>:<file>:<rule>:<line> and only match these historical
+# commits, so a real secret added later is still caught.
+#
+# roles/komodo/defaults/main.yml:24,47 are `changeme` placeholder defaults.
+f7bc7202f5211bf2b7dd63e4fc471097611c3c3e:roles/komodo/defaults/main.yml:generic-password:24
+f7bc7202f5211bf2b7dd63e4fc471097611c3c3e:roles/komodo/defaults/main.yml:generic-password:47
